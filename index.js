@@ -1,8 +1,8 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const SHA256 = require('crypto-js/sha256');
-const packageData = require('./package.json');
 
+const packageData = require('./package.json');
 const app = express();
 const port = 31823;
 
