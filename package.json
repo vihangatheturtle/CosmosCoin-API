@@ -1,0 +1,12 @@
+{
+  "name": "VingaCoin",
+  "version": "1.0.0",
+  "description": "The VingaCoin API server",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
