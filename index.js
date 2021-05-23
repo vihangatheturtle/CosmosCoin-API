@@ -78,6 +78,7 @@ class CryptoBlockchain{
 var mineDiff = 4;
 var nodeData = {};
 var txNTBC = {};
+var secretUsedSecretIDs = {};
 let CosmosCoin = new CryptoBlockchain();
 let tempCoin = new CryptoBlockchain();
 tempCoin.blockchain[0] = CosmosCoin.blockchain[0];
@@ -99,51 +100,83 @@ function splHalf(str) {
 }
 
 app.post('/nodes/register-new-node', function(req, res) {
-	var uuid = uuidv4();
-	var mnspl = splHalf(req.headers["machinename"]);
-	req.headers["machinename"] = "csms" + makeid(8) + mnspl[0] + makeid(8) + mnspl[1] + makeid(8) + "node";
 	try {
-		nodeData[uuid] = {"machineName":req.headers["machinename"],"uuid":uuid};
-	} catch {
-		res.json({"error":true,"message":"Invalid machinename"});
-		return;
+		var uuid = uuidv4();
+		var mnspl = splHalf(req.headers["machinename"]);
+		var sid = req.headers["sid"];
+		var wid = req.headers["wid"];
+		secretUsedSecretIDs[sid] = wid;
+		req.headers["machinename"] = "csms" + makeid(8) + mnspl[0] + makeid(8) + mnspl[1] + makeid(8) + "node";
+		try {
+			nodeData[uuid] = {"machineName":req.headers["machinename"],"uuid":uuid};
+		} catch {
+			res.json({"error":true,"message":"Invalid machinename"});
+			return;
+		}
+		res.json({"error":false,"message":nodeData[uuid]});
+	} catch (ex) {
+		console.log(ex);
+		res.json({"error":true,"message":"An unknown error occurred"});
 	}
-	res.json({"error":false,"message":nodeData[uuid]});
 });
 
 var blckMine = false;
 
 app.post('/tx/transactions', function(req, res) {
 	var machineUUID = req.headers["uuid"];
-	if (machineUUID) {
-		try {
-			var txID = uuidv4();
-			var from = req.headers["from"];
-			var to = req.headers["to"];
-			var price = req.headers["price"];
-			if (price == null) {
-				res.send("invalidBodyMissingPrice");
+	var sid = req.headers["sid"];
+	if (sid) {
+		if (secretUsedSecretIDs[sid]) {
+			if (req.headers["from"]) {
+				if (secretUsedSecretIDs[sid] == req.headers["from"]) {
+					procTransaction();
+				} else {
+					res.send("widInvalid");
+					return;
+				}
+			} else {
+				res.send("widNotProvided");
 				return;
 			}
-			if (to == null) {
-				res.send("invalidBodyMissingTo");
-				return;
-			}
-			if (from == null) {
-				res.send("invalidBodyMissingFrom");
-				return;
-			}
-			var time = Date.now().toString();
-			var hash = SHA256(to + from + txID + price).toString();
-			txNTBC[txID] = {"txBody":{"txFrom":from,"txTo":to,"txPrice":price},"txID":txID,"txTicks":Date.now().toString(),"txHash":hash};
-			res.send(txNTBC[txID]);
-		} catch (ex) {
-			console.log(ex);
-			res.send('err');
+		} else {
+			res.send("sidInvalid");
+			return;
 		}
 	} else {
-		res.send('noUUIDProvided');
+		res.send("sidNotProvided");
 		return;
+	}
+	function procTransaction() {
+		if (machineUUID) {
+			try {
+				var txID = uuidv4();
+				var from = req.headers["from"];
+				var to = req.headers["to"];
+				var price = req.headers["price"];
+				if (price == null) {
+					res.send("invalidBodyMissingPrice");
+					return;
+				}
+				if (to == null) {
+					res.send("invalidBodyMissingTo");
+					return;
+				}
+				if (from == null) {
+					res.send("invalidBodyMissingFrom");
+					return;
+				}
+				var time = Date.now().toString();
+				var hash = SHA256(to + from + txID + price).toString();
+				txNTBC[txID] = {"txBody":{"txFrom":from,"txTo":to,"txPrice":price},"txID":txID,"txTicks":Date.now().toString(),"txHash":hash};
+				res.send(txNTBC[txID]);
+			} catch (ex) {
+				console.log(ex);
+				res.send('err');
+			}
+		} else {
+			res.send('noUUIDProvided');
+			return;
+		}
 	}
 });
 
