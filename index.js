@@ -3,19 +3,32 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const SHA256 = require('crypto-js/sha256');
+const bp = require('body-parser');
 
 const packageData = require('./package.json');
 const app = express();
 const port = 31823;
 
+app.use(bp.json())
+app.use(bp.urlencoded({ extended: true }))
+
 class CryptoBlock{
-    constructor(index, data, precedingHash=" "){
+    constructor(index, data, precedingHash=" ", dataOverride=false){
+	if (!dataOverride) {
      this.index = index;
      this.timestamp = Date.now().toString();
      this.data = data;
      this.precedingHash = precedingHash;
      this.hash = this.computeHash();
 	 this.nonce = 0;
+	} else {
+	 this.index = data.index;
+     this.timestamp = data.timestamp;
+     this.data = data.data;
+     this.precedingHash = data.precedingHash;
+     this.hash = data.hash;
+	 this.nonce = data.nonce;
+	}
     }
     computeHash(){
         return SHA256(this.index + this.precedingHash + this.timestamp + JSON.stringify(this.data)+this.nonce).toString();
@@ -24,7 +37,7 @@ class CryptoBlock{
 		while(this.hash.substring(0, difficulty) !==Array(difficulty + 1).join("0")){
 			this.nonce++;
 		    this.hash = this.computeHash();
-	    }        
+	    }
 	}
 }
 
@@ -44,6 +57,9 @@ class CryptoBlockchain{
         newBlock.proofOfWork(this.difficulty);
         this.blockchain.push(newBlock);
     }
+	addNewBlockRaw(newBlock){
+        this.blockchain.push(newBlock);
+    }
 	checkChainValidity(){
         for(let i = 1; i < this.blockchain.length; i++){
             const currentBlock = this.blockchain[i];
@@ -61,8 +77,9 @@ class CryptoBlockchain{
 
 var mineDiff = 4;
 var nodeData = {};
-var bchain = {};
 let CosmosCoin = new CryptoBlockchain();
+let tempCoin = new CryptoBlockchain();
+tempCoin.blockchain[0] = CosmosCoin.blockchain[0];
 
 function makeid(length) {
     var result           = [];
@@ -93,16 +110,48 @@ app.post('/nodes/register-new-node', function(req, res) {
 	res.json({"error":false,"message":nodeData[uuid]});
 });
 
+var blckMine = false;
+
 app.post('/mine/publish/block', function(req, res) {
-	console.log(req.body);
+	if (!blckMine) {
+		blckMine = true;
+		tempCoin.addNewBlockRaw(new CryptoBlock(1, req.body, req.body["precedingHash"], true));
+		if (!tempCoin.checkChainValidity()) {
+			tempCoin = new CryptoBlockchain();
+			for (i=0; i<CosmosCoin.blockchain.length; i++) {
+				tempCoin.blockchain[i] = CosmosCoin.blockchain[i];
+			}
+			res.send('invalidBlock');
+		} else {
+			CosmosCoin.addNewBlockRaw(new CryptoBlock(1, req.body, req.body["precedingHash"], true));
+			if (CosmosCoin.checkChainValidity()) {
+				console.log('block mined');
+				res.send('validBlock');
+			}
+		}
+		blckMine = false;
+	} else {
+		res.send('blockInProcess');
+	}
 });
 
 app.get('/mine/genesis', function(req, res) {
-	res.send(CosmosCoin["blockchain"][0]);
+	res.send(JSON.stringify(CosmosCoin["blockchain"][0]));
 });
 
 app.get('/mine/bchain', function(req, res) {
-	res.send(bchain);
+	function reply() {
+		setTimeout(() => {
+			if (!blckMine) {
+				res.send(JSON.stringify(CosmosCoin, null, 4));
+				return;
+			} else {
+				reply();
+			}
+		}, 500);
+	}
+	
+	reply();
 });
 
 app.get('/mine/diff', function(req, res) {
