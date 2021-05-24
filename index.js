@@ -77,8 +77,11 @@ class CryptoBlockchain{
 
 var mineDiff = 4;
 var nodeData = {};
+var nodes = [];
 var txNTBC = {};
 var secretUsedSecretIDs = {};
+var secretUsedWalletIDs = {};
+var miners = {};
 let CosmosCoin = new CryptoBlockchain();
 let tempCoin = new CryptoBlockchain();
 tempCoin.blockchain[0] = CosmosCoin.blockchain[0];
@@ -105,15 +108,57 @@ app.post('/nodes/register-new-node', function(req, res) {
 		var mnspl = splHalf(req.headers["machinename"]);
 		var sid = req.headers["sid"];
 		var wid = req.headers["wid"];
-		secretUsedSecretIDs[sid] = wid;
-		req.headers["machinename"] = "csms" + makeid(8) + mnspl[0] + makeid(8) + mnspl[1] + makeid(8) + "node";
-		try {
-			nodeData[uuid] = {"machineName":req.headers["machinename"],"uuid":uuid};
-		} catch {
-			res.json({"error":true,"message":"Invalid machinename"});
-			return;
+		var pwdhash = req.headers["pwdhash"];
+		var type = req.headers["type"];
+		if (type == "miner") {
+			if (wid) {
+				req.headers["machinename"] = "csms" + makeid(8) + mnspl[0] + makeid(8) + mnspl[1] + makeid(8) + "node";
+				try {
+					miners[uuid] = {"machineName":req.headers["machinename"],"uuid":uuid,"wallet":wid};
+				} catch {
+					res.json({"error":true,"message":"Invalid machinename"});
+					return;
+				}
+				res.json({"error":false,"message":miners[uuid]});
+			} else {
+				res.json({"error":true,"message":"Invalid WalletID"});
+			}
+		} else {
+			if (pwdhash) {
+				if (sid) {
+					if (wid) {
+						if (secretUsedWalletIDs[wid] == null) {
+							cont();
+						} else {
+							if (secretUsedWalletIDs[wid] == sid) {
+								cont();
+							} else {
+								res.json({"error":true,"message":"Wallet already registered"});
+							}
+						}
+						function cont() {
+							secretUsedSecretIDs[sid] = wid;
+							secretUsedWalletIDs[wid] = sid;
+							req.headers["machinename"] = "csms" + makeid(8) + mnspl[0] + makeid(8) + mnspl[1] + makeid(8) + "node";
+							try {
+								nodeData[uuid] = {"machineName":req.headers["machinename"],"uuid":uuid,"senderSignExpect":SHA256(sid + uuid + secretUsedSecretIDs[sid] + pwdhash).toString()};
+								nodes.push(uuid);
+							} catch {
+								res.json({"error":true,"message":"Invalid machinename"});
+								return;
+							}
+							res.json({"error":false,"message":nodeData[uuid]});
+						}
+					} else {
+						res.json({"error":true,"message":"Invalid WalletID"});
+					}
+				} else {
+					res.json({"error":true,"message":"Invalid SecretID"});
+				}
+			} else {
+				res.json({"error":true,"message":"Invalid pwdhash"});
+			}
 		}
-		res.json({"error":false,"message":nodeData[uuid]});
 	} catch (ex) {
 		console.log(ex);
 		res.json({"error":true,"message":"An unknown error occurred"});
@@ -125,11 +170,22 @@ var blckMine = false;
 app.post('/tx/transactions', function(req, res) {
 	var machineUUID = req.headers["uuid"];
 	var sid = req.headers["sid"];
+	var senderSign = req.headers["sendersign"];
 	if (sid) {
 		if (secretUsedSecretIDs[sid]) {
 			if (req.headers["from"]) {
 				if (secretUsedSecretIDs[sid] == req.headers["from"]) {
-					procTransaction();
+					if (senderSign) {
+						if (senderSign == nodeData[machineUUID]["senderSignExpect"]) {
+							procTransaction();
+						} else {
+							res.send("senderSignInvalid");
+							return;
+						}
+					} else {
+						res.send("senderSignNotProvided");
+						return;
+					}
 				} else {
 					res.send("widInvalid");
 					return;
@@ -166,8 +222,8 @@ app.post('/tx/transactions', function(req, res) {
 					return;
 				}
 				var time = Date.now().toString();
-				var hash = SHA256(to + from + txID + price).toString();
-				txNTBC[txID] = {"txBody":{"txFrom":from,"txTo":to,"txPrice":price},"txID":txID,"txTicks":Date.now().toString(),"txHash":hash};
+				var hash = SHA256(to + from + txID + price + senderSign).toString();
+				txNTBC[txID] = {"txBody":{"txFrom":from,"txTo":to,"txPrice":price},"txID":txID,"txTicks":Date.now().toString(),"txHash":hash,"senderUUID":machineUUID,"senderSign":SHA256(senderSign).toString()};
 				res.send(txNTBC[txID]);
 			} catch (ex) {
 				console.log(ex);
@@ -186,6 +242,8 @@ app.get('/tx/transactions', function(req, res) {
 
 app.post('/mine/publish/block', function(req, res) {
 	var machineUUID = req.headers["uuid"];
+	var senderUUID = req.headers["senderuuid"];
+	var senderSign = req.headers["sendersignpassthrough"];
 	var txIDTransaction = null;
 	if (req.headers["txid"] == null) {
 		res.send('noTxIDProvided');
@@ -211,25 +269,29 @@ app.post('/mine/publish/block', function(req, res) {
 		res.send('noUUIDProvided');
 		return;
 	}
-	if (nodeData[machineUUID]) {
+	if (miners[machineUUID]) {
 		if (!blckMine) {
-			blckMine = true;
-			tempCoin.addNewBlockRaw(new CryptoBlock(tempCoin.blockchain.length, req.body, req.body["precedingHash"], true));
-			if (!tempCoin.checkChainValidity()) {
-				tempCoin = new CryptoBlockchain();
-				for (i=0; i<CosmosCoin.blockchain.length; i++) {
-					tempCoin.blockchain[i] = CosmosCoin.blockchain[i];
+			if (senderSign == SHA256(nodeData[senderUUID]["senderSignExpect"]).toString()) {
+				blckMine = true;
+				tempCoin.addNewBlockRaw(new CryptoBlock(tempCoin.blockchain.length, req.body, req.body["precedingHash"], true));
+				if (!tempCoin.checkChainValidity()) {
+					tempCoin = new CryptoBlockchain();
+					for (i=0; i<CosmosCoin.blockchain.length; i++) {
+						tempCoin.blockchain[i] = CosmosCoin.blockchain[i];
+					}
+					res.send('invalidBlock');
+				} else {
+					CosmosCoin.addNewBlockRaw(new CryptoBlock(CosmosCoin.blockchain.length, req.body, req.body["precedingHash"], true));
+					delete txNTBC[req.headers["txid"]];
+					if (CosmosCoin.checkChainValidity()) {
+						console.log("[blockchain] +block:" + txIDTransaction + ":" + miners[machineUUID]["machineName"]);
+						res.send('validBlock');
+					}
 				}
-				res.send('invalidBlock');
+				blckMine = false;
 			} else {
-				CosmosCoin.addNewBlockRaw(new CryptoBlock(CosmosCoin.blockchain.length, req.body, req.body["precedingHash"], true));
-				delete txNTBC[req.headers["txid"]];
-				if (CosmosCoin.checkChainValidity()) {
-					console.log("[blockchain] +block:" + txIDTransaction + ":" + nodeData[machineUUID]["machineName"]);
-					res.send('validBlock');
-				}
+				res.send('senderSignInvalid');
 			}
-			blckMine = false;
 		} else {
 			res.send('blockInProcess');
 		}
@@ -264,7 +326,7 @@ app.get('/mine/diff', function(req, res) {
 });
 
 app.get('/nodes/node-list', function(req, res) {
-	res.send(nodeData);
+	res.send(nodes);
 });
 
 app.get('/', function(req, res) {
