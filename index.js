@@ -102,14 +102,57 @@ function splHalf(str) {
 	return [str.slice(0, half), str.slice(half, str.length)]
 }
 
+app.post('/nodes/unregister-node', function(req, res) {
+	try {
+		var uuid = req.headers["uuid"];
+		var sid = req.headers["sid"];
+		var wid = req.headers["wid"];
+		var type = req.headers["type"];
+		var senderSign = req.headers["sendersign"];
+		if (sid) {
+			if (uuid) {
+				if (senderSign) {
+					if (senderSign == nodeData[uuid]["senderSignExpect"]) {
+						if (secretUsedSecretIDs[sid] == wid) {
+							if (secretUsedWalletIDs[wid] == sid) {
+								if (type == "wallet") {
+									try {
+										delete secretUsedSecretIDs[sid];
+										delete secretUsedWalletIDs[sid];
+										if (nodes.indexOf(uuid) > -1) {
+										  nodes.splice(nodes.indexOf(uuid), 1);
+										}
+										res.send("unregistered");
+										console.log(uuid + "::logout");
+										return;
+									} catch (ex) {
+										console.log(ex)
+										res.send("errorWhilstUnregistering");
+										return;
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		res.send('failedToUnregisterNode');
+	} catch {
+		res.send("errorWhilstUnregistering");
+	}
+});
+
 app.post('/nodes/register-new-node', function(req, res) {
 	try {
 		var uuid = uuidv4();
 		var mnspl = splHalf(req.headers["machinename"]);
 		var sid = req.headers["sid"];
 		var wid = req.headers["wid"];
-		var pwdhash = req.headers["pwdhash"];
 		var type = req.headers["type"];
+		var pwdhash = req.headers["pwdhash"];
+		var loginUUID = req.headers["loginuuid"];
+		var senderSign = req.headers["sendersign"];
 		if (type == "miner") {
 			if (wid) {
 				req.headers["machinename"] = "csms" + makeid(8) + mnspl[0] + makeid(8) + mnspl[1] + makeid(8) + "node";
@@ -126,31 +169,65 @@ app.post('/nodes/register-new-node', function(req, res) {
 		} else {
 			if (pwdhash) {
 				if (sid) {
-					if (wid) {
-						if (secretUsedWalletIDs[wid] == null) {
+					if (secretUsedWalletIDs[SHA256(sid).toString()] == null) {
+						if (loginUUID == null) {
 							cont();
 						} else {
-							if (secretUsedWalletIDs[wid] == sid) {
-								cont();
-							} else {
-								res.json({"error":true,"message":"Wallet already registered"});
-							}
-						}
-						function cont() {
-							secretUsedSecretIDs[sid] = wid;
-							secretUsedWalletIDs[wid] = sid;
-							req.headers["machinename"] = "csms" + makeid(8) + mnspl[0] + makeid(8) + mnspl[1] + makeid(8) + "node";
-							try {
-								nodeData[uuid] = {"machineName":req.headers["machinename"],"uuid":uuid,"senderSignExpect":SHA256(sid + uuid + secretUsedSecretIDs[sid] + pwdhash).toString()};
-								nodes.push(uuid);
-							} catch {
-								res.json({"error":true,"message":"Invalid machinename"});
-								return;
-							}
-							res.json({"error":false,"message":nodeData[uuid]});
+							res.json({"error":true,"message":"Not registered"});
 						}
 					} else {
-						res.json({"error":true,"message":"Invalid WalletID"});
+						if (secretUsedWalletIDs[SHA256(sid).toString()] == sid) {
+							if (loginUUID == null) {
+								cont();
+							} else {
+								login();
+							}
+						} else {
+							res.json({"error":true,"message":"Wallet already registered"});
+						}
+					}
+					function login() {
+						try {
+							if (senderSign == nodeData[loginUUID]["senderSignExpect"]) {
+								secretUsedSecretIDs[sid] = SHA256(sid).toString();
+								secretUsedWalletIDs[SHA256(sid).toString()] = sid;
+								req.headers["machinename"] = "csms" + makeid(8) + mnspl[0] + makeid(8) + mnspl[1] + makeid(8) + "node";
+								try {
+									delete nodeData[loginUUID];
+									nodeData[uuid] = {"machineName":req.headers["machinename"],"uuid":uuid,"wallet":SHA256(sid).toString(),"senderSignExpect":SHA256(sid + uuid + secretUsedSecretIDs[sid] + pwdhash).toString()};
+									try {
+										if (nodes.indexOf(loginUUID) > -1) {
+										  nodes.splice(nodes.indexOf(loginUUID), 1);
+										}
+									} catch { }
+									nodes.push(uuid);
+								} catch {
+									res.json({"error":true,"message":"Invalid machinename"});
+									return;
+								}
+								res.json({"error":false,"message":nodeData[uuid]});
+								console.log(loginUUID + "::login");
+							} else {
+								res.json({"error":true,"message":"Invalid senderSign"});
+								return;
+							}
+						} catch {
+							res.json({"error":true,"message":"Invalid senderSign"});
+						}
+					}
+					function cont() {
+						secretUsedSecretIDs[sid] = SHA256(sid).toString();
+						secretUsedWalletIDs[SHA256(sid).toString()] = sid;
+						req.headers["machinename"] = "csms" + makeid(8) + mnspl[0] + makeid(8) + mnspl[1] + makeid(8) + "node";
+						try {
+							nodeData[uuid] = {"machineName":req.headers["machinename"],"uuid":uuid,"wallet":SHA256(sid).toString(),"senderSignExpect":SHA256(sid + uuid + secretUsedSecretIDs[sid] + pwdhash).toString()};
+							nodes.push(uuid);
+						} catch {
+							res.json({"error":true,"message":"Invalid machinename"});
+							return;
+						}
+						res.json({"error":false,"message":nodeData[uuid]});
+						console.log(uuid + "::register");
 					}
 				} else {
 					res.json({"error":true,"message":"Invalid SecretID"});
