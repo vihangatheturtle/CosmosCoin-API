@@ -109,32 +109,20 @@ app.post('/nodes/unregister-node', function(req, res) {
 		var wid = req.headers["wid"];
 		var type = req.headers["type"];
 		var senderSign = req.headers["sendersign"];
-		if (sid) {
-			if (uuid) {
-				if (senderSign) {
-					if (senderSign == nodeData[uuid]["senderSignExpect"]) {
-						if (secretUsedSecretIDs[sid] == wid) {
-							if (secretUsedWalletIDs[wid] == sid) {
-								if (type == "wallet") {
-									try {
-										delete secretUsedSecretIDs[sid];
-										delete secretUsedWalletIDs[sid];
-										if (nodes.indexOf(uuid) > -1) {
-										  nodes.splice(nodes.indexOf(uuid), 1);
-										}
-										res.send("unregistered");
-										console.log(uuid + "::logout");
-										return;
-									} catch (ex) {
-										console.log(ex)
-										res.send("errorWhilstUnregistering");
-										return;
-									}
-								}
-							}
-						}
-					}
+		if (sid && uuid && senderSign && senderSign == nodeData[uuid]["senderSignExpect"] && secretUsedSecretIDs[sid] == wid &&secretUsedWalletIDs[wid] == sid && type == "wallet") {
+			try {
+				delete secretUsedSecretIDs[sid];
+				delete secretUsedWalletIDs[sid];
+				if (nodes.indexOf(uuid) > -1) {
+				  nodes.splice(nodes.indexOf(uuid), 1);
 				}
+				res.send("unregistered");
+				console.log(uuid + "::logout");
+				return;
+			} catch (ex) {
+				console.log(ex)
+				res.send("errorWhilstUnregistering");
+				return;
 			}
 		}
 		res.send('failedToUnregisterNode');
